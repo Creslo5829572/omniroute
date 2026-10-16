@@ -1,0 +1,44 @@
+#!/usr/bin/env node
+// Usage: ask-model <model> "prompt"   |   ask-model --list
+// Calls the local OmniRoute gateway started by the SessionStart hook.
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+const base = process.env.OMNIROUTE_URL || "http://127.0.0.1:20128";
+const keyFile = process.env.OMNIROUTE_KEY_FILE || join(homedir(), ".omniroute", "claude-code.key");
+let key;
+try {
+  key = readFileSync(keyFile, "utf8").trim();
+} catch {
+  console.error(`No gateway key at ${keyFile} yet — see ~/.omniroute/claude-bootstrap.log`);
+  process.exit(1);
+}
+const headers = { authorization: `Bearer ${key}`, "content-type": "application/json" };
+const [model, ...rest] = process.argv.slice(2);
+
+if (!model || model === "--help") {
+  console.error('Usage: ask-model <model> "prompt"  |  ask-model --list');
+  process.exit(2);
+}
+
+if (model === "--list") {
+  const res = await fetch(`${base}/v1/models`, { headers });
+  const { data = [] } = await res.json();
+  for (const m of data) console.log(m.id);
+  process.exit(0);
+}
+
+const prompt = rest.join(" ") || readFileSync(0, "utf8");
+const res = await fetch(`${base}/v1/chat/completions`, {
+  method: "POST",
+  headers,
+  body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], stream: false }),
+});
+const json = await res.json();
+if (json.choices?.[0]) {
+  console.log(json.choices[0].message?.content ?? "");
+} else {
+  console.error(JSON.stringify(json.error ?? json));
+  process.exit(1);
+}
